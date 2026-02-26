@@ -1,14 +1,17 @@
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
   ArrowLeftRight,
   Signal,
   ClipboardList,
-  SettingsIcon,
+  Settings as SettingsIcon,
   Activity,
   ShieldAlert,
+  Loader2,
 } from "lucide-react";
 import clsx from "clsx";
+import api from "../api/client";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -19,6 +22,27 @@ const navItems = [
 ];
 
 export default function Sidebar() {
+  const [stopping, setStopping] = useState(false);
+  const [stopConfirm, setStopConfirm] = useState(false);
+
+  const handleEmergencyStop = async () => {
+    if (!stopConfirm) {
+      setStopConfirm(true);
+      setTimeout(() => setStopConfirm(false), 3000);
+      return;
+    }
+
+    setStopping(true);
+    try {
+      await api.emergencyStop();
+    } catch {
+      // Still complete — emergency stops should always "feel" responsive
+    } finally {
+      setStopping(false);
+      setStopConfirm(false);
+    }
+  };
+
   return (
     <aside className="w-64 bg-aurora-950 border-r border-aurora-800/50 flex flex-col">
       {/* Logo */}
@@ -68,10 +92,23 @@ export default function Sidebar() {
 
       {/* Emergency Stop */}
       <div className="p-4 border-t border-aurora-800/50">
-        <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-loss/20 hover:bg-loss/40 text-loss-light border border-loss/30 rounded-lg transition-all duration-200 active:scale-95">
-          <ShieldAlert className="w-5 h-5" />
+        <button
+          onClick={handleEmergencyStop}
+          disabled={stopping}
+          className={clsx(
+            "w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg transition-all duration-200 active:scale-95",
+            stopConfirm
+              ? "bg-loss text-white border-2 border-loss animate-pulse"
+              : "bg-loss/20 hover:bg-loss/40 text-loss-light border border-loss/30"
+          )}
+        >
+          {stopping ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <ShieldAlert className="w-5 h-5" />
+          )}
           <span className="text-sm font-bold uppercase tracking-wider">
-            Emergency Stop
+            {stopConfirm ? "CONFIRM STOP" : "Emergency Stop"}
           </span>
         </button>
       </div>

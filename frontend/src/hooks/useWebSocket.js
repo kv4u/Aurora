@@ -15,7 +15,7 @@ export default function useWebSocket() {
   const connect = useCallback(() => {
     const token = localStorage.getItem("aurora_token");
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/ws?token=${token}`;
+    const url = `${protocol}//${window.location.host}/api/v1/ws${token ? `?token=${token}` : ""}`;
 
     ws.current = new WebSocket(url);
 

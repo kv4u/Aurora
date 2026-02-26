@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.security.rate_limiter import RateLimiter
 
 settings = get_settings()
 
@@ -42,6 +43,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Rate Limiter Middleware (must be added before CORS)
+app.add_middleware(RateLimiter, max_requests=100, window_seconds=60)
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -75,5 +79,8 @@ async def root():
 
 
 # API routers
-from app.api.router import api_router
+from app.api.router import api_router  # noqa: E402
+from app.api.ws import router as ws_router  # noqa: E402
+
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(ws_router, prefix="/api/v1")
