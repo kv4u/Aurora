@@ -60,8 +60,8 @@ class Trade(Base):
     filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Extra metadata
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Extra data
+    extra_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (
         Index("ix_trades_symbol_placed", "symbol", "placed_at"),

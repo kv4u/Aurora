@@ -74,6 +74,6 @@ async def root():
     }
 
 
-# API routers will be registered here as they're built
-# from app.api.router import api_router
-# app.include_router(api_router, prefix="/api/v1")
+# API routers
+from app.api.router import api_router
+app.include_router(api_router, prefix="/api/v1")
