@@ -6,12 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.portfolio import Portfolio
+from app.security.auth import require_auth
 
 router = APIRouter()
 
 
 @router.get("")
-async def get_portfolio(db: AsyncSession = Depends(get_db)):
+async def get_portfolio(
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
     """Get latest portfolio snapshot."""
     result = await db.execute(
         select(Portfolio).order_by(desc(Portfolio.timestamp)).limit(1)
@@ -47,6 +51,7 @@ async def get_portfolio(db: AsyncSession = Depends(get_db)):
 async def get_equity_curve(
     days: int = Query(30, le=365),
     db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
 ):
     """Get equity curve data for charting."""
     result = await db.execute(

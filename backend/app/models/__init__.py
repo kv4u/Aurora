@@ -6,6 +6,7 @@ from app.models.portfolio import Portfolio
 from app.models.risk_events import RiskEvent
 from app.models.signals import Signal
 from app.models.trades import Trade
+from app.security.auth import User
 
 __all__ = [
     "MarketData",
@@ -15,4 +16,5 @@ __all__ = [
     "Portfolio",
     "AuditLog",
     "RiskEvent",
+    "User",
 ]

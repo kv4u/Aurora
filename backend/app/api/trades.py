@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.trades import Trade
+from app.security.auth import require_auth
 
 router = APIRouter()
 
@@ -17,6 +18,7 @@ async def get_trades(
     limit: int = Query(50, le=200),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
 ):
     """Get trade history with optional filters."""
     query = select(Trade).order_by(desc(Trade.placed_at))
@@ -57,7 +59,11 @@ async def get_trades(
 
 
 @router.get("/{trade_id}")
-async def get_trade(trade_id: int, db: AsyncSession = Depends(get_db)):
+async def get_trade(
+    trade_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
     """Get a single trade with full details."""
     result = await db.execute(select(Trade).where(Trade.id == trade_id))
     trade = result.scalar_one_or_none()

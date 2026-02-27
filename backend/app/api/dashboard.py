@@ -8,12 +8,16 @@ from app.database import get_db
 from app.models.portfolio import Portfolio
 from app.models.signals import Signal
 from app.models.trades import Trade
+from app.security.auth import require_auth
 
 router = APIRouter()
 
 
 @router.get("")
-async def get_dashboard(db: AsyncSession = Depends(get_db)):
+async def get_dashboard(
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
     """Get dashboard overview data."""
 
     # Latest portfolio snapshot

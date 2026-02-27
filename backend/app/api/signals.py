@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.signals import Signal
+from app.security.auth import require_auth
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ async def get_signals(
     limit: int = Query(50, le=200),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
 ):
     """Get signal history with optional filters."""
     query = select(Signal).order_by(desc(Signal.timestamp))

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.audit_log import AuditLog
+from app.security.auth import require_auth
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ async def get_audit_log(
     limit: int = Query(100, le=500),
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
 ):
     """Get audit log entries with optional filters."""
     query = select(AuditLog).order_by(desc(AuditLog.timestamp))
@@ -49,7 +51,11 @@ async def get_audit_log(
 
 
 @router.get("/chain/{chain_id}")
-async def get_decision_chain(chain_id: str, db: AsyncSession = Depends(get_db)):
+async def get_decision_chain(
+    chain_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: str = Depends(require_auth),
+):
     """Get all audit entries for a decision chain."""
     result = await db.execute(
         select(AuditLog)
