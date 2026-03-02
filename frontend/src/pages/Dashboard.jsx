@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useState, useCallback } from "react";
 import {
   TrendingUp,
   TrendingDown,
@@ -10,6 +10,8 @@ import {
   Zap,
   Wifi,
   WifiOff,
+  Play,
+  Loader2,
 } from "lucide-react";
 import api from "../api/client";
 import useApi from "../hooks/useApi";
@@ -47,11 +49,30 @@ export default function Dashboard() {
   });
 
   const { connected, portfolio: wsPortfolio, signals: wsSignals, circuitBreaker } = useWebSocket();
+  const [cycleRunning, setCycleRunning] = useState(false);
+  const [cycleResult, setCycleResult] = useState(null);
+
+  const handleRunCycle = useCallback(async () => {
+    setCycleRunning(true);
+    setCycleResult(null);
+    try {
+      const result = await api.runCycle();
+      setCycleResult(result);
+    } catch (err) {
+      setCycleResult({ error: err.message });
+    } finally {
+      setCycleRunning(false);
+    }
+  }, []);
 
   // Merge: WebSocket data overrides REST data when available
   const portfolio = wsPortfolio || data?.portfolio;
   const recentSignals = wsSignals.length > 0 ? wsSignals : (data?.recent_signals || []);
-  const positions = portfolio?.positions || [];
+  // positions can be a dict (keyed by symbol) or array — normalize to array
+  const rawPositions = portfolio?.positions || {};
+  const positions = Array.isArray(rawPositions)
+    ? rawPositions
+    : Object.entries(rawPositions).map(([symbol, pos]) => ({ symbol, ...pos }));
   const cbLevel = circuitBreaker?.level || "GREEN";
 
   const stats = useMemo(() => [
@@ -180,6 +201,18 @@ export default function Dashboard() {
           <p className="text-aurora-400 text-sm mt-1">Real-time system overview</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={handleRunCycle}
+            disabled={cycleRunning}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+          >
+            {cycleRunning ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Play className="w-3.5 h-3.5" />
+            )}
+            {cycleRunning ? "Running..." : "Run Cycle"}
+          </button>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-aurora-800/50 border border-aurora-700/30">
             {connected ? (
               <>
@@ -221,6 +254,27 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* Cycle Result */}
+      {cycleResult && (
+        <div className={`card border ${cycleResult.error ? "border-loss/30 bg-loss/5" : "border-profit/30 bg-profit/5"}`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className={`font-semibold ${cycleResult.error ? "text-loss-light" : "text-profit"}`}>
+                {cycleResult.error ? "Cycle Error" : "Cycle Complete"}
+              </p>
+              <p className="text-aurora-400 text-sm mt-1">
+                {cycleResult.error
+                  ? cycleResult.error
+                  : `${cycleResult.symbols_processed} symbols | ${cycleResult.signals_generated} signals | ${cycleResult.signals_approved} approved | ${cycleResult.trades_placed} trades`}
+              </p>
+            </div>
+            <button onClick={() => setCycleResult(null)} className="text-aurora-500 hover:text-aurora-300 text-sm">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Equity Chart */}
       <div className="card">
@@ -276,7 +330,7 @@ export default function Dashboard() {
           <h2 className="text-lg font-semibold mb-4">Recent Signals</h2>
           {recentSignals.length > 0 ? (
             <div className="space-y-3">
-              {recentSignals.slice(0, 5).map((sig, idx) => (
+              {recentSignals.slice(0, 8).map((sig, idx) => (
                 <div key={sig.id || idx} className="flex items-center justify-between p-3 bg-aurora-800/20 rounded-lg">
                   <div className="flex items-center gap-3">
                     <span className="font-mono font-bold text-aurora-200">{sig.symbol}</span>
@@ -287,12 +341,25 @@ export default function Dashboard() {
                     }`}>
                       {sig.action}
                     </span>
+                    {sig.status && sig.status !== "pending" && (
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        sig.status === "approved" || sig.status === "executed" ? "bg-profit/10 text-profit" :
+                        sig.status === "rejected" ? "bg-loss/10 text-loss-light" :
+                        "bg-aurora-700/20 text-aurora-500"
+                      }`}>
+                        {sig.status}
+                      </span>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="font-mono text-sm text-aurora-300">
                       {fmt(sig.confidence ? sig.confidence * 100 : 0, 1)}%
                     </p>
-                    <p className="text-xs text-aurora-500">confidence</p>
+                    <p className="text-xs text-aurora-500">
+                      {sig.claude_approved != null
+                        ? sig.claude_approved ? "Claude: approved" : "Claude: rejected"
+                        : "confidence"}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -301,7 +368,7 @@ export default function Dashboard() {
             <div className="text-center py-8">
               <Activity className="w-10 h-10 text-aurora-600 mx-auto mb-3" />
               <p className="text-aurora-400">No signals generated yet</p>
-              <p className="text-aurora-600 text-sm">ML engine will generate signals during market hours</p>
+              <p className="text-aurora-600 text-sm">Run a cycle to generate ML signals</p>
             </div>
           )}
         </div>

@@ -108,9 +108,18 @@ class AuroraClient {
     return this.request("GET", `/analysis/${symbol}`);
   }
 
+  // Manual cycle trigger
+  runCycle() {
+    return this.request("POST", "/dashboard/run-cycle");
+  }
+
   // Emergency
   emergencyStop() {
     return this.request("POST", "/emergency-stop");
+  }
+
+  resumeTrading() {
+    return this.request("POST", "/resume");
   }
 }
 

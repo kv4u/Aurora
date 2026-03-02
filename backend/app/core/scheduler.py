@@ -77,8 +77,9 @@ class TradingLoop:
                 )
                 return results
 
-            # 2. Ingest latest bars
-            await self.ingestion.ingest_bars(symbols, timeframe="1Min", limit=1)
+            # 2. Ingest latest bars (daily if no Alpaca, else 1Min)
+            tf = "1Day" if not self.ingestion._has_alpaca else "1Min"
+            await self.ingestion.ingest_bars(symbols, timeframe=tf, limit=1)
 
             # 3. Compute indicators
             all_indicators = await self.indicators.compute_for_watchlist(symbols)

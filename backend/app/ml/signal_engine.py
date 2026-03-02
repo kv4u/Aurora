@@ -14,7 +14,7 @@ from app.models.signals import Signal
 
 logger = logging.getLogger("aurora.signals")
 
-MODEL_DIR = Path("/app/ml_models")
+MODEL_DIR = Path(__file__).resolve().parent.parent.parent / "ml_models"
 
 
 class SignalEngine:
@@ -127,63 +127,217 @@ class SignalEngine:
         return "HOLD", float(hold_prob)
 
     def _predict_heuristic(self, features: dict) -> tuple[str, float]:
-        """Heuristic fallback when no ML model is available.
-        Uses a weighted combination of technical signals.
+        """Multi-strategy heuristic when no ML model is available.
+
+        Runs 4 independent strategy scores, picks the strongest signal.
+        Each strategy returns a directional score (-1 to +1) and a weight.
         """
-        score = 0.0
-        weights_total = 0.0
+        strategies = {
+            "mean_reversion": self._strategy_mean_reversion(features),
+            "momentum": self._strategy_momentum(features),
+            "trend_follow": self._strategy_trend_follow(features),
+            "breakout": self._strategy_breakout(features),
+        }
 
-        # RSI
-        rsi = features.get("rsi_14", 50)
-        if rsi < 30:
-            score += 2.0  # Oversold → BUY signal
-        elif rsi > 70:
-            score -= 2.0  # Overbought → SELL signal
-        elif rsi < 45:
-            score += 0.5
-        elif rsi > 55:
-            score -= 0.5
-        weights_total += 2.0
+        # Weighted combination
+        total_score = 0.0
+        total_weight = 0.0
+        for name, (score, weight) in strategies.items():
+            total_score += score * weight
+            total_weight += weight
 
-        # MACD
-        macd_hist = features.get("macd_histogram", 0)
-        if macd_hist > 0:
-            score += 1.0
-        else:
-            score -= 1.0
-        weights_total += 1.0
+        normalized = total_score / total_weight if total_weight > 0 else 0
 
-        # Trend alignment
-        trend = features.get("trend_alignment_score", 0)
-        score += trend * 2.0
-        weights_total += 2.0
+        # Also check if any single strategy has a very strong conviction
+        best_strategy = max(strategies.items(), key=lambda x: abs(x[1][0]) * x[1][1])
+        best_name, (best_score, best_weight) = best_strategy
 
-        # Volume confirmation
-        vol_confirm = features.get("volume_price_confirmation", 0)
-        score += vol_confirm * 1.0
-        weights_total += 1.0
-
-        # Bollinger Band position
-        bb_pos = features.get("bb_position", 0.5)
-        if bb_pos < 0.2:
-            score += 1.5  # Near lower band → BUY
-        elif bb_pos > 0.8:
-            score -= 1.5  # Near upper band → SELL
-        weights_total += 1.5
-
-        # Normalize to -1 to +1
-        normalized = score / weights_total if weights_total > 0 else 0
+        # If a single strategy is very strong (>0.7), boost the signal
+        if abs(best_score) > 0.7:
+            normalized = normalized * 0.6 + best_score * 0.4
 
         # Convert to action and confidence
-        if normalized > 0.3:
-            confidence = min(0.5 + normalized * 0.3, 0.85)
+        # Threshold of 0.15 (lowered from 0.3) — Claude review will filter bad signals
+        if normalized > 0.15:
+            confidence = min(0.55 + normalized * 0.35, 0.85)
             return "BUY", confidence
-        elif normalized < -0.3:
-            confidence = min(0.5 + abs(normalized) * 0.3, 0.85)
+        elif normalized < -0.15:
+            confidence = min(0.55 + abs(normalized) * 0.35, 0.85)
             return "SELL", confidence
         else:
             confidence = 0.5 + (1 - abs(normalized)) * 0.2
             return "HOLD", confidence
+
+    @staticmethod
+    def _strategy_mean_reversion(f: dict) -> tuple[float, float]:
+        """Mean reversion: buy oversold, sell overbought."""
+        score = 0.0
+        rsi = f.get("rsi_14", 50)
+        bb_pos = f.get("bb_position", 0.5)
+        williams = f.get("williams_r", -50)
+        stoch_k = f.get("stoch_k", 50)
+        mean_rev = f.get("mean_reversion_score", 0)
+
+        # RSI extremes
+        if rsi < 30:
+            score += 0.6
+        elif rsi < 40:
+            score += 0.2
+        elif rsi > 70:
+            score -= 0.6
+        elif rsi > 60:
+            score -= 0.2
+
+        # Bollinger Band extremes
+        if bb_pos < 0.1:
+            score += 0.5
+        elif bb_pos < 0.25:
+            score += 0.2
+        elif bb_pos > 0.9:
+            score -= 0.5
+        elif bb_pos > 0.75:
+            score -= 0.2
+
+        # Stochastics oversold/overbought
+        if stoch_k < 20:
+            score += 0.3
+        elif stoch_k > 80:
+            score -= 0.3
+
+        # Williams %R
+        if williams < -80:
+            score += 0.2
+        elif williams > -20:
+            score -= 0.2
+
+        # Weight increases when price is far from mean (higher mean_rev_score)
+        weight = 1.0 + min(mean_rev * 2, 1.0)
+        return (max(min(score, 1.0), -1.0), weight)
+
+    @staticmethod
+    def _strategy_momentum(f: dict) -> tuple[float, float]:
+        """Momentum: follow short-term price direction with volume confirmation."""
+        score = 0.0
+        ret_1d = f.get("return_1d", 0)
+        ret_5d = f.get("return_5d", 0)
+        roc = f.get("roc_10", 0)
+        macd_hist = f.get("macd_histogram", 0)
+        vol_confirm = f.get("volume_price_confirmation", 0)
+        rsi_macd = f.get("rsi_macd_agreement", 0)
+
+        # Short-term returns
+        if ret_1d > 0.02:
+            score += 0.3
+        elif ret_1d < -0.02:
+            score -= 0.3
+
+        if ret_5d > 0.03:
+            score += 0.3
+        elif ret_5d < -0.03:
+            score -= 0.3
+
+        # Rate of change
+        if roc > 5:
+            score += 0.2
+        elif roc < -5:
+            score -= 0.2
+
+        # MACD histogram direction
+        if macd_hist > 0:
+            score += 0.2
+        elif macd_hist < 0:
+            score -= 0.2
+
+        # Volume-price confirmation amplifies the signal
+        score *= (1 + abs(vol_confirm) * 0.5)
+
+        # RSI-MACD agreement
+        if rsi_macd > 0:
+            score *= 1.2
+        elif rsi_macd < 0:
+            score *= 0.8
+
+        weight = 1.5  # Momentum gets higher base weight
+        return (max(min(score, 1.0), -1.0), weight)
+
+    @staticmethod
+    def _strategy_trend_follow(f: dict) -> tuple[float, float]:
+        """Trend following: align with the dominant trend direction."""
+        score = 0.0
+        trend = f.get("trend_alignment_score", 0)
+        adx = f.get("adx_14", 20)
+        trend_strength = f.get("trend_strength_composite", 0)
+        ema_cross = f.get("ema12_ema26_cross", 0)
+        sma_cross = f.get("sma20_sma50_cross", 0)
+        price_sma20 = f.get("price_vs_sma20", 1)
+        price_sma50 = f.get("price_vs_sma50", 1)
+        sar = f.get("parabolic_sar_signal", 0)
+
+        # Trend alignment is the core signal
+        score += trend * 0.4
+
+        # EMA/SMA crossovers
+        if ema_cross > 0:
+            score += 0.15
+        elif ema_cross < 0:
+            score -= 0.15
+
+        if sma_cross > 0:
+            score += 0.15
+        elif sma_cross < 0:
+            score -= 0.15
+
+        # Price above/below moving averages
+        if price_sma20 > 1.01 and price_sma50 > 1.01:
+            score += 0.2  # Bullish: above both MAs
+        elif price_sma20 < 0.99 and price_sma50 < 0.99:
+            score -= 0.2  # Bearish: below both MAs
+
+        # SAR signal
+        score += sar * 0.1
+
+        # ADX gives weight — strong trend means this strategy matters more
+        weight = 0.8 + min(adx / 40, 1.2)
+        return (max(min(score, 1.0), -1.0), weight)
+
+    @staticmethod
+    def _strategy_breakout(f: dict) -> tuple[float, float]:
+        """Breakout detection: volume surge + price at extremes."""
+        score = 0.0
+        vol_ratio = f.get("volume_vs_sma20", 1)
+        vol_breakout = f.get("volume_breakout_score", 0)
+        bb_pos = f.get("bb_position", 0.5)
+        bb_squeeze = f.get("bb_squeeze", 0)
+        breakout_prob = f.get("breakout_probability", 0)
+        ret_1d = f.get("return_1d", 0)
+        keltner = f.get("keltner_position", 0.5)
+
+        # Volume surge is necessary for breakout
+        if vol_ratio < 1.3:
+            return (0.0, 0.5)  # No volume surge = no breakout
+
+        # Bollinger squeeze release
+        if bb_squeeze > 0.5:
+            score += 0.3 if ret_1d > 0 else -0.3
+
+        # Price breaking above/below bands
+        if bb_pos > 0.95 and ret_1d > 0:
+            score += 0.4  # Upside breakout
+        elif bb_pos < 0.05 and ret_1d < 0:
+            score -= 0.4  # Downside breakdown
+
+        # Keltner channel breakout
+        if keltner > 0.9 and ret_1d > 0:
+            score += 0.3
+        elif keltner < 0.1 and ret_1d < 0:
+            score -= 0.3
+
+        # Scale by volume surge strength
+        vol_multiplier = min(vol_ratio / 2.0, 1.5)
+        score *= vol_multiplier
+
+        weight = 1.0 + breakout_prob
+        return (max(min(score, 1.0), -1.0), weight)
 
     def _get_top_features(self, features: dict, n: int = 5) -> dict:
         """Get top N features by absolute value (for audit)."""

@@ -116,11 +116,20 @@ app.add_middleware(
 @app.get("/health")
 async def health_check():
     """System health endpoint."""
+    from app.api.emergency import is_halted
+
+    scheduler_status = "stopped"
+    if _scheduler and _scheduler.running:
+        scheduler_status = "halted" if is_halted() else "running"
+
     return {
         "status": "online",
         "system": "AURORA",
         "mode": settings.aurora_mode,
         "version": "1.0.0",
+        "scheduler": scheduler_status,
+        "watchlist_count": len(settings.watchlist_symbols),
+        "alpaca": bool(settings.alpaca_api_key.get_secret_value()),
     }
 
 

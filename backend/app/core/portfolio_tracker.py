@@ -4,12 +4,15 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.models.portfolio import Portfolio
 
 logger = logging.getLogger("aurora.portfolio")
+
+PAPER_STARTING_BALANCE = 100_000.0
 
 
 class PortfolioTracker:
@@ -19,6 +22,7 @@ class PortfolioTracker:
         self.settings = settings
         self.db = db
         self._client: httpx.AsyncClient | None = None
+        self._has_alpaca = bool(settings.alpaca_api_key.get_secret_value())
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -50,6 +54,73 @@ class PortfolioTracker:
         return resp.json()
 
     async def snapshot(self) -> dict:
+        """Take a full portfolio snapshot. Uses Alpaca if available, else paper mode."""
+        if self._has_alpaca:
+            return await self._snapshot_alpaca()
+        return await self._snapshot_paper()
+
+    async def _snapshot_paper(self) -> dict:
+        """Paper-mode snapshot using DB-tracked state (no broker needed)."""
+        # Get last snapshot from DB, or create initial one
+        result = await self.db.execute(
+            select(Portfolio).order_by(desc(Portfolio.timestamp)).limit(1)
+        )
+        last = result.scalar_one_or_none()
+
+        equity = last.total_equity if last else PAPER_STARTING_BALANCE
+        cash = last.cash if last else PAPER_STARTING_BALANCE
+        positions_data = last.positions if last else {}
+        peak_equity = last.peak_equity if last else equity
+
+        market_value = sum(
+            p.get("market_value", 0) for p in positions_data.values()
+        )
+        total_exposure_pct = (market_value / equity * 100) if equity > 0 else 0
+        peak_equity = max(peak_equity, equity)
+        drawdown = ((peak_equity - equity) / peak_equity * 100) if peak_equity > 0 else 0
+
+        # Store snapshot
+        snap = Portfolio(
+            total_equity=equity,
+            cash=cash,
+            market_value=market_value,
+            daily_pnl=0.0,
+            daily_pnl_pct=0.0,
+            total_exposure_pct=total_exposure_pct,
+            open_positions_count=len(positions_data),
+            peak_equity=peak_equity,
+            current_drawdown_pct=drawdown,
+            sector_exposure={},
+            positions=positions_data,
+        )
+        self.db.add(snap)
+        await self.db.flush()
+
+        logger.info(
+            "Paper portfolio snapshot: $%.2f equity, %d positions, %.1f%% exposure",
+            equity, len(positions_data), total_exposure_pct,
+        )
+
+        return {
+            "total_equity": equity,
+            "cash": cash,
+            "market_value": market_value,
+            "daily_pnl": 0.0,
+            "daily_pnl_pct": 0.0,
+            "weekly_pnl": 0.0,
+            "weekly_pnl_pct": 0.0,
+            "monthly_pnl": 0.0,
+            "monthly_pnl_pct": 0.0,
+            "total_exposure_pct": total_exposure_pct,
+            "open_positions_count": len(positions_data),
+            "positions": positions_data,
+            "sector_exposure": {},
+            "peak_equity": peak_equity,
+            "current_drawdown_pct": drawdown,
+            "trades_today": 0,
+        }
+
+    async def _snapshot_alpaca(self) -> dict:
         """Take a full portfolio snapshot and store it."""
         try:
             account = await self.get_account()
