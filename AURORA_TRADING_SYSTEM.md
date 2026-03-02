@@ -1,6 +1,6 @@
 # 🌅 AURORA — Automated Unified Real-time Orchestrated Analytics
 
-## Autonomous Stock Analysis & Trading System — Claude Code Project Blueprint
+## Autonomous Stock Analysis & Trading System — Project Blueprint
 
 > **Version:** 1.0.0
 > **Deployment:** Web-based (Lightweight)
@@ -24,7 +24,7 @@
 10. [Web Dashboard](#10-web-dashboard)
 11. [Audit System](#11-audit-system)
 12. [Deployment Phases](#12-deployment-phases)
-13. [Claude Code Build Order](#13-claude-code-build-order)
+13. [Build Order](#13-build-order)
 14. [Configuration & Environment](#14-configuration--environment)
 15. [Testing Strategy](#15-testing-strategy)
 
@@ -1034,7 +1034,7 @@ class AuditReportGenerator:
 
 ### Phase 1: BUILD (Weeks 1-3)
 
-Using Claude Code, build the system in this order:
+Build the system in this order:
 
 ```
 Week 1: Foundation
@@ -1097,9 +1097,9 @@ SCALING RULES:
 
 ---
 
-## 13. Claude Code Build Order
+## 13. Build Order
 
-### Copy-paste these commands sequentially into Claude Code:
+### Build steps in sequence:
 
 ```
 STEP 1 — SCAFFOLDING:
@@ -1310,7 +1310,7 @@ REQUIRED_METRICS = {
 
 ## Quick Start
 
-After building with Claude Code:
+After building:
 
 ```bash
 # 1. Clone and configure
@@ -1364,4 +1364,4 @@ make seed
 
 ---
 
-*Built with Claude Code — AURORA v1.0.0*
+*AURORA v1.0.0*

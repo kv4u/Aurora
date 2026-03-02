@@ -4,17 +4,19 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import select, func as sqlfunc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.core.audit_logger import AuditLogger
-from app.core.claude_analyst import ClaudeAnalyst
+from app.core.claude_analyst import ClaudeAnalyst, SECTOR_MAP
 from app.core.data_ingestion import DataIngestion
 from app.core.indicators import IndicatorEngine
 from app.core.portfolio_tracker import PortfolioTracker
 from app.core.risk_manager import CircuitBreakerLevel, RiskManager
 from app.core.trade_executor import TradeExecutor
 from app.ml.signal_engine import SignalEngine
+from app.models.market_data import MarketData
 
 logger = logging.getLogger("aurora.scheduler")
 
@@ -81,7 +83,7 @@ class TradingLoop:
             # 3. Compute indicators
             all_indicators = await self.indicators.compute_for_watchlist(symbols)
 
-            # 4. Get market context (SPY, VIX)
+            # 4. Build rich market context (SPY, VIX, realized vol)
             market_context = await self._build_market_context()
 
             # 5. Generate and process signals
@@ -102,22 +104,10 @@ class TradingLoop:
 
                     results["signals_generated"] += 1
 
-                    # Claude review
-                    news = await self.ingestion.fetch_news([symbol], limit=5)
-                    context = {
-                        "price": indicators.get("close", 0) if "close" in indicators else 0,
-                        "change_pct": indicators.get("return_1d", 0),
-                        "volume_ratio": indicators.get("volume_vs_sma20", 1),
-                        "vix": market_context.get("vix", 20),
-                        "spy_change": market_context.get("spy_return_1d", 0),
-                        "sector_perf": "N/A",
-                        "recent_news": "\n".join(
-                            [f"- {n['headline']}" for n in news[:3]]
-                        ) if news else "No recent news.",
-                        "upcoming_events": "None known.",
-                        "high_52w": 0,
-                        "low_52w": 0,
-                    }
+                    # Build rich context for Claude
+                    context = await self._build_symbol_context(
+                        symbol, indicators, market_context,
+                    )
 
                     review = await self.claude.review_signal(
                         {
@@ -195,18 +185,190 @@ class TradingLoop:
 
         return results
 
+    # ─── Context Builders ───
+
     async def _build_market_context(self) -> dict:
-        """Build market context dict (SPY, VIX) for signal generation."""
-        context = {"spy_return_1d": 0, "vix": 20, "vix_change": 0}
+        """Build market-wide context: SPY price/return, realized volatility as VIX proxy."""
+        context = {"spy_return_1d": 0, "spy_change": 0, "vix": 20, "vix_change": 0}
 
         try:
             spy_price = await self.ingestion.get_latest_price("SPY")
             if spy_price:
                 context["spy_price"] = spy_price
+
+            # SPY return from stored bars
+            spy_bars = await self._get_recent_bars("SPY", limit=20)
+            if len(spy_bars) >= 2:
+                prev_close = spy_bars[-2]["close"]
+                cur_close = spy_bars[-1]["close"]
+                if prev_close > 0:
+                    ret = (cur_close - prev_close) / prev_close
+                    context["spy_return_1d"] = ret
+                    context["spy_change"] = ret
+
+            # Estimate realized vol as VIX proxy from SPY returns
+            if len(spy_bars) >= 10:
+                import numpy as np
+                closes = [b["close"] for b in spy_bars]
+                returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+                realized_vol = float(np.std(returns) * (252 ** 0.5) * 100)
+                context["vix"] = round(realized_vol, 1)
+                if len(returns) >= 10:
+                    recent_vol = float(np.std(returns[-5:]) * (252 ** 0.5) * 100)
+                    prior_vol = float(np.std(returns[-10:-5]) * (252 ** 0.5) * 100)
+                    context["vix_change"] = (recent_vol - prior_vol) / prior_vol if prior_vol > 0 else 0
         except Exception:
-            pass
+            logger.debug("Market context build failed, using defaults")
 
         return context
+
+    async def _build_symbol_context(
+        self,
+        symbol: str,
+        indicators: dict,
+        market_context: dict,
+    ) -> dict:
+        """Build rich per-symbol context for Claude signal review."""
+
+        price = indicators.get("close", 0)
+        if not price:
+            latest_price = await self.ingestion.get_latest_price(symbol)
+            price = latest_price or 0
+
+        # 52-week high/low from stored bar data
+        high_52w, low_52w = await self._get_52w_range(symbol)
+
+        # News with summaries
+        news = await self.ingestion.fetch_news([symbol], limit=5)
+        news_lines = []
+        for n in news[:5]:
+            headline = n.get("headline", "")
+            summary = n.get("summary", "")
+            source = n.get("source", "")
+            line = f"- [{source}] {headline}"
+            if summary:
+                line += f" — {summary[:120]}"
+            news_lines.append(line)
+        news_str = "\n".join(news_lines) if news_lines else "No recent news available."
+
+        # Sector context
+        sector = SECTOR_MAP.get(symbol, "Unknown")
+        sector_perf = self._estimate_sector_label(market_context)
+
+        return {
+            "price": price,
+            "change_pct": indicators.get("return_1d", 0),
+            "volume_ratio": indicators.get("volume_vs_sma20", 1),
+            "vix": market_context.get("vix", 20),
+            "vix_change": market_context.get("vix_change", 0),
+            "spy_change": market_context.get("spy_change", 0),
+            "sector_perf": f"{sector} — {sector_perf}",
+            "recent_news": news_str,
+            "upcoming_events": "None known.",
+            "high_52w": high_52w,
+            "low_52w": low_52w,
+        }
+
+    async def build_analysis_context(self, symbol: str) -> dict:
+        """Build full context for on-demand deep analysis. Called by the API endpoint."""
+
+        indicators = await self.indicators.compute_for_symbol(symbol)
+        if not indicators:
+            indicators = {}
+
+        price = indicators.get("close", 0)
+        if not price:
+            latest_price = await self.ingestion.get_latest_price(symbol)
+            price = latest_price or 0
+
+        high_52w, low_52w = await self._get_52w_range(symbol)
+        market_context = await self._build_market_context()
+
+        # Richer news for on-demand analysis
+        news = await self.ingestion.fetch_news([symbol], limit=8)
+        news_lines = []
+        for n in news[:8]:
+            headline = n.get("headline", "")
+            summary = n.get("summary", "")
+            source = n.get("source", "")
+            line = f"- [{source}] {headline}"
+            if summary:
+                line += f" — {summary[:150]}"
+            news_lines.append(line)
+        news_str = "\n".join(news_lines) if news_lines else "No recent news available."
+
+        sector = SECTOR_MAP.get(symbol, "Unknown")
+        sector_perf = self._estimate_sector_label(market_context)
+
+        return {
+            "price": price,
+            "change_pct": indicators.get("return_1d", 0),
+            "high_52w": high_52w,
+            "low_52w": low_52w,
+            "vix": market_context.get("vix", 20),
+            "vix_change": market_context.get("vix_change", 0),
+            "spy_change": market_context.get("spy_change", 0),
+            "sector_perf": f"{sector} — {sector_perf}",
+            "recent_news": news_str,
+            "upcoming_events": "None known.",
+            "indicators": indicators,
+        }
+
+    # ─── Data Helpers ───
+
+    async def _get_52w_range(self, symbol: str) -> tuple[float, float]:
+        """Compute 52-week high/low from stored daily bar data."""
+        try:
+            result = await self.db.execute(
+                select(
+                    sqlfunc.max(MarketData.high).label("high_52w"),
+                    sqlfunc.min(MarketData.low).label("low_52w"),
+                )
+                .where(
+                    MarketData.symbol == symbol,
+                    MarketData.timeframe == "1Day",
+                )
+            )
+            row = result.one_or_none()
+            if row and row.high_52w and row.low_52w:
+                return float(row.high_52w), float(row.low_52w)
+        except Exception as e:
+            logger.debug("52w range query failed for %s: %s", symbol, e)
+
+        return 0.0, 0.0
+
+    async def _get_recent_bars(self, symbol: str, limit: int = 20) -> list[dict]:
+        """Get recent daily bars from database."""
+        try:
+            result = await self.db.execute(
+                select(MarketData)
+                .where(
+                    MarketData.symbol == symbol,
+                    MarketData.timeframe == "1Day",
+                )
+                .order_by(MarketData.timestamp.desc())
+                .limit(limit)
+            )
+            rows = list(result.scalars().all())
+            rows.reverse()
+            return [
+                {"close": r.close, "high": r.high, "low": r.low, "volume": r.volume}
+                for r in rows
+            ]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _estimate_sector_label(market_context: dict) -> str:
+        """Simple sector label based on broad market direction."""
+        spy_ret = market_context.get("spy_change", 0)
+        if abs(spy_ret) < 0.001:
+            return "Flat"
+        elif spy_ret > 0.01:
+            return "Broad market positive"
+        elif spy_ret < -0.01:
+            return "Broad market negative"
+        return "Slightly positive" if spy_ret > 0 else "Slightly negative"
 
     async def cleanup(self):
         """Clean up resources."""

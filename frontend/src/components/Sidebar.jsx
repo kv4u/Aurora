@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   ArrowLeftRight,
   Signal,
+  Brain,
   ClipboardList,
   Settings as SettingsIcon,
   Activity,
@@ -17,6 +18,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/trades", icon: ArrowLeftRight, label: "Trades" },
   { to: "/signals", icon: Signal, label: "Signals" },
+  { to: "/analysis", icon: Brain, label: "Analysis" },
   { to: "/audit", icon: ClipboardList, label: "Audit" },
   { to: "/settings", icon: SettingsIcon, label: "Settings" },
 ];

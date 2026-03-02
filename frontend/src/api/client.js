@@ -99,6 +99,15 @@ class AuroraClient {
     return this.request("PUT", "/settings", settings);
   }
 
+  // Analysis
+  getWatchlistOverview() {
+    return this.request("GET", "/analysis");
+  }
+
+  analyzeSymbol(symbol) {
+    return this.request("GET", `/analysis/${symbol}`);
+  }
+
   // Emergency
   emergencyStop() {
     return this.request("POST", "/emergency-stop");
