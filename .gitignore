@@ -1,0 +1,56 @@
+# ═══════════════════════════════════════
+#  AURORA .gitignore
+# ═══════════════════════════════════════
+
+# Environment & Secrets (CRITICAL)
+.env
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+
+# ML Models (large files)
+*.joblib
+*.pkl
+*.h5
+ml_models/
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker
+*.log
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+test-results/
+playwright-report/
+
+# Misc
+*.bak
+*.tmp

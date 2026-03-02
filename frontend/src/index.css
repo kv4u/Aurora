@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-bg-primary: #001233;
+    --color-bg-secondary: #001d4d;
+    --color-bg-card: #003070;
+    --color-accent: #3399ff;
+    --color-profit: #22c55e;
+    --color-loss: #ef4444;
+  }
+
+  body {
+    @apply bg-aurora-950 text-white;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+
+  /* Custom scrollbar for the dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-aurora-950;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-aurora-700 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-aurora-600;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-aurora-900/50 backdrop-blur-sm border border-aurora-700/30 rounded-xl p-6;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-300 hover:border-aurora-500/50 hover:shadow-lg hover:shadow-aurora-500/10;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 bg-aurora-500 hover:bg-aurora-400 text-white font-medium rounded-lg
+           transition-all duration-200 active:scale-95;
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 bg-loss hover:bg-loss-light text-white font-medium rounded-lg
+           transition-all duration-200 active:scale-95;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 text-aurora-300 hover:text-white hover:bg-aurora-800/50 rounded-lg
+           transition-all duration-200;
+  }
+
+  .stat-value {
+    @apply text-3xl font-bold font-mono tracking-tight;
+  }
+
+  .stat-label {
+    @apply text-sm text-aurora-300 uppercase tracking-wider;
+  }
+
+  .status-dot {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .status-online {
+    @apply status-dot bg-profit animate-pulse-slow;
+  }
+
+  .status-offline {
+    @apply status-dot bg-aurora-600;
+  }
+
+  .status-warning {
+    @apply status-dot bg-circuit-yellow animate-pulse;
+  }
+
+  .status-danger {
+    @apply status-dot bg-circuit-red animate-pulse;
+  }
+
+  .pnl-positive {
+    @apply text-profit-light;
+  }
+
+  .pnl-negative {
+    @apply text-loss-light;
+  }
+
+  .table-row {
+    @apply border-b border-aurora-800/50 hover:bg-aurora-800/20 transition-colors;
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 10px rgba(51, 153, 255, 0.5);
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-aurora-300 to-aurora-500 bg-clip-text text-transparent;
+  }
+}
