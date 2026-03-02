@@ -22,6 +22,7 @@ class DataIngestion:
         self.settings = settings
         self.db = db
         self._client: httpx.AsyncClient | None = None
+        self._has_alpaca = bool(settings.alpaca_api_key.get_secret_value())
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -51,6 +52,18 @@ class DataIngestion:
         """Fetch latest bars for watchlist symbols."""
         total_stored = 0
         for symbol in symbols:
+            # If no Alpaca keys, go straight to yfinance for daily bars
+            if not self._has_alpaca:
+                if timeframe in ("1Day", "1D"):
+                    try:
+                        bars = await self._fetch_bars_yfinance(symbol, limit)
+                        if bars:
+                            count = await self._store_bars(bars, symbol, "1Day")
+                            total_stored += count
+                    except Exception as e:
+                        logger.error("yfinance fetch failed for %s: %s", symbol, e)
+                continue
+
             try:
                 bars = await self._fetch_bars_alpaca(symbol, timeframe, limit)
                 if bars:
@@ -122,8 +135,10 @@ class DataIngestion:
 
         bars = []
         for ts, row in hist.iterrows():
+            # Convert pandas Timestamp to Python datetime for asyncpg compatibility
+            dt = ts.to_pydatetime()
             bars.append({
-                "timestamp": ts.isoformat(),
+                "timestamp": dt,
                 "open": float(row["Open"]),
                 "high": float(row["High"]),
                 "low": float(row["Low"]),
@@ -177,6 +192,9 @@ class DataIngestion:
 
     async def fetch_news(self, symbols: list[str], limit: int = 10) -> list[dict]:
         """Fetch recent news headlines from Alpaca for Claude context."""
+        if not self._has_alpaca:
+            return []
+
         try:
             resp = await self.client.get(
                 "/v1beta1/news",
@@ -207,18 +225,35 @@ class DataIngestion:
     # ─── Latest Price ───
 
     async def get_latest_price(self, symbol: str) -> float | None:
-        """Get the latest trade price for a symbol."""
+        """Get the latest trade price for a symbol. Falls back to yfinance."""
+        if self._has_alpaca:
+            try:
+                resp = await self.client.get(
+                    f"/v2/stocks/{symbol}/trades/latest",
+                    params={"feed": "iex"},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return float(data["trade"]["p"])
+            except Exception:
+                pass
+
+        # yfinance fallback: get latest close from DB or live
         try:
-            resp = await self.client.get(
-                f"/v2/stocks/{symbol}/trades/latest",
-                params={"feed": "iex"},
+            from sqlalchemy import select
+            result = await self.db.execute(
+                select(MarketData.close)
+                .where(MarketData.symbol == symbol, MarketData.timeframe == "1Day")
+                .order_by(MarketData.timestamp.desc())
+                .limit(1)
             )
-            resp.raise_for_status()
-            data = resp.json()
-            return float(data["trade"]["p"])
+            row = result.scalar_one_or_none()
+            if row:
+                return float(row)
         except Exception as e:
             logger.warning("Latest price fetch failed for %s: %s", symbol, e)
-            return None
+
+        return None
 
     async def get_latest_prices(self, symbols: list[str]) -> dict[str, float]:
         """Get latest prices for multiple symbols."""

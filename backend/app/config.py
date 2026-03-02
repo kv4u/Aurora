@@ -9,9 +9,9 @@ class Settings(BaseSettings):
     aurora_mode: str = "paper"
     aurora_log_level: str = "INFO"
 
-    # ─── Alpaca ───
-    alpaca_api_key: SecretStr
-    alpaca_secret_key: SecretStr
+    # ─── Alpaca (optional — yfinance used as fallback) ───
+    alpaca_api_key: SecretStr = SecretStr("")
+    alpaca_secret_key: SecretStr = SecretStr("")
     alpaca_base_url: str = "https://paper-api.alpaca.markets"
     alpaca_data_url: str = "https://data.alpaca.markets"
 
