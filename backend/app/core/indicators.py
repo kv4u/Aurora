@@ -112,6 +112,13 @@ def compute_all_indicators(df: pd.DataFrame) -> dict:
     vol_5d = df["volume"].rolling(5).mean()
     indicators["volume_ratio_5d"] = float(df["volume"].iloc[-1] / vol_5d.iloc[-1]) if vol_5d.iloc[-1] > 0 else 1.0
 
+    # ─── Raw OHLCV (latest bar) ───
+    indicators["open"] = float(df["open"].iloc[-1])
+    indicators["high"] = float(df["high"].iloc[-1])
+    indicators["low"] = float(df["low"].iloc[-1])
+    indicators["close"] = float(df["close"].iloc[-1])
+    indicators["volume"] = int(df["volume"].iloc[-1])
+
     # ─── Price-based ───
     close = df["close"].iloc[-1]
     indicators["return_1d"] = float(df["close"].pct_change(1).iloc[-1])
