@@ -1,0 +1,25 @@
+"""Main API router — aggregates all endpoint modules."""
+
+from fastapi import APIRouter
+
+from app.api.auth import router as auth_router
+from app.api.dashboard import router as dashboard_router
+from app.api.emergency import router as emergency_router
+from app.api.trades import router as trades_router
+from app.api.portfolio import router as portfolio_router
+from app.api.signals import router as signals_router
+from app.api.audit import router as audit_router
+from app.api.settings import router as settings_router
+from app.api.analysis import router as analysis_router
+
+api_router = APIRouter()
+
+api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+api_router.include_router(emergency_router, tags=["emergency"])
+api_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(trades_router, prefix="/trades", tags=["trades"])
+api_router.include_router(portfolio_router, prefix="/portfolio", tags=["portfolio"])
+api_router.include_router(signals_router, prefix="/signals", tags=["signals"])
+api_router.include_router(audit_router, prefix="/audit", tags=["audit"])
+api_router.include_router(settings_router, prefix="/settings", tags=["settings"])
+api_router.include_router(analysis_router, prefix="/analysis", tags=["analysis"])
