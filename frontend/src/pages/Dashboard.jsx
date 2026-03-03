@@ -301,16 +301,26 @@ export default function Dashboard() {
             <div className="space-y-3">
               {positions.map((pos, idx) => (
                 <div key={pos.symbol || idx} className="flex items-center justify-between p-3 bg-aurora-800/20 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono font-bold text-aurora-200">{pos.symbol}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded ${pos.side === "long" ? "bg-profit/20 text-profit" : "bg-loss/20 text-loss-light"}`}>
-                      {pos.side?.toUpperCase() || "LONG"}
-                    </span>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono font-bold text-aurora-200">{pos.symbol}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded font-bold ${pos.side === "buy" ? "bg-profit/20 text-profit" : "bg-loss/20 text-loss-light"}`}>
+                        {pos.side?.toUpperCase() || "LONG"}
+                      </span>
+                      <span className="text-xs text-aurora-500">{pos.shares || pos.qty} shares</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-aurora-500">
+                      <span>Entry: ${fmt(pos.entry_price, 2)}</span>
+                      <span>→</span>
+                      <span>Now: ${fmt(pos.current_price, 2)}</span>
+                    </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-mono text-sm">{pos.qty} shares</p>
-                    <p className={`text-xs ${(pos.unrealized_pl ?? 0) >= 0 ? "pnl-positive" : "pnl-negative"}`}>
-                      {fmtUSD(pos.unrealized_pl)}
+                    <p className={`font-mono text-sm font-bold ${(pos.unrealized_pnl ?? pos.unrealized_pl ?? 0) >= 0 ? "text-profit" : "text-loss-light"}`}>
+                      {fmtUSD(pos.unrealized_pnl ?? pos.unrealized_pl)}
+                    </p>
+                    <p className={`text-xs ${(pos.unrealized_pnl_pct ?? 0) >= 0 ? "text-profit" : "text-loss-light"}`}>
+                      {fmtPct(pos.unrealized_pnl_pct)}
                     </p>
                   </div>
                 </div>
@@ -320,7 +330,7 @@ export default function Dashboard() {
             <div className="text-center py-8">
               <Zap className="w-10 h-10 text-aurora-600 mx-auto mb-3" />
               <p className="text-aurora-400">No active positions</p>
-              <p className="text-aurora-600 text-sm">Positions will appear here during trading hours</p>
+              <p className="text-aurora-600 text-sm">Run a cycle to generate trades</p>
             </div>
           )}
         </div>

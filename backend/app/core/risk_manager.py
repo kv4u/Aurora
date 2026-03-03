@@ -104,8 +104,8 @@ class RiskManager:
         if self._circuit_breaker == CircuitBreakerLevel.ORANGE and action != "SELL":
             return RiskCheckResult(False, "ORANGE circuit breaker — only exits allowed")
 
-        # 2. Minimum confidence threshold
-        min_confidence = 0.60
+        # 2. Minimum confidence threshold (lowered for paper mode — Claude is the main filter)
+        min_confidence = 0.50
         if confidence < min_confidence:
             return RiskCheckResult(False, f"Confidence {confidence:.1%} below minimum {min_confidence:.1%}")
 
@@ -136,8 +136,13 @@ class RiskManager:
 
         # 7. Open positions check
         open_positions = portfolio.get("open_positions_count", 0)
-        if action == "BUY" and open_positions >= self.max_open_positions:
+        if open_positions >= self.max_open_positions:
             return RiskCheckResult(False, f"Max open positions reached ({open_positions}/{self.max_open_positions})")
+
+        # 7b. Duplicate position check — no second trade on same symbol
+        existing_positions = portfolio.get("positions", {})
+        if symbol in existing_positions:
+            return RiskCheckResult(False, f"Already have an open position in {symbol}")
 
         # 8. Sector exposure check
         sector_exposure = portfolio.get("sector_exposure", {})

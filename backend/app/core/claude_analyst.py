@@ -245,11 +245,23 @@ class ClaudeAnalyst:
 
         prompt = self._build_review_prompt(signal, context)
 
+        # In paper mode, add context so Claude is more willing to approve for learning
+        system = REVIEW_SYSTEM_PROMPT
+        if self.settings.aurora_mode == "paper":
+            system += """
+
+PAPER TRADING MODE:
+This is a paper trading system with simulated money. The goal is to TEST the strategy and learn.
+- Be more willing to approve signals that have reasonable technical merit, even if not perfect
+- Only reject signals with CLEAR contradictions or dangerous setups
+- Marginal signals should be approved with conservative sizing so we can track performance
+- A 50-60% confidence is acceptable for paper trades with conservative sizing"""
+
         try:
             response = await self.client.messages.create(
                 model=self.settings.claude_model,
                 max_tokens=600,
-                system=REVIEW_SYSTEM_PROMPT,
+                system=system,
                 messages=[{"role": "user", "content": prompt}],
             )
 

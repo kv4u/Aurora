@@ -43,6 +43,7 @@ class TradeExecutor:
         self.risk = risk_manager
         self.audit = audit
         self._client: httpx.AsyncClient | None = None
+        self._has_alpaca = bool(settings.alpaca_api_key.get_secret_value())
 
     @property
     def client(self) -> httpx.AsyncClient:
@@ -75,6 +76,7 @@ class TradeExecutor:
         current_price = signal.get("current_price", 0)
         features = signal.get("features_snapshot", {})
         atr = features.get("atr_14", current_price * 0.02)  # Fallback: 2% of price
+        is_short = signal.get("action") == "SELL"
 
         # Apply Claude sizing recommendation
         sizing_multiplier = {
@@ -92,13 +94,20 @@ class TradeExecutor:
         if shares <= 0:
             shares = 1  # Minimum 1 share
 
-        # ATR-based stop and target
-        stop_price = round(current_price - (2.0 * atr), 2)
-        target_price = round(current_price + (3.0 * atr), 2)
-        limit_price = round(current_price * 1.001, 2)  # Tiny premium for fill
+        # ATR-based stop and target (direction depends on side)
+        if is_short:
+            # SHORT: stop ABOVE entry (loss), target BELOW entry (profit)
+            stop_price = round(current_price + (2.0 * atr), 2)
+            target_price = round(current_price - (3.0 * atr), 2)
+            limit_price = round(current_price * 0.999, 2)  # Slight discount for short fill
+        else:
+            # LONG: stop BELOW entry (loss), target ABOVE entry (profit)
+            stop_price = round(current_price - (2.0 * atr), 2)
+            target_price = round(current_price + (3.0 * atr), 2)
+            limit_price = round(current_price * 1.001, 2)  # Tiny premium for fill
 
-        risk = current_price - stop_price
-        reward = target_price - current_price
+        risk = abs(current_price - stop_price)
+        reward = abs(target_price - current_price)
         rr_ratio = round(reward / risk, 2) if risk > 0 else 0
 
         return PositionSize(
@@ -154,9 +163,16 @@ class TradeExecutor:
             logger.warning("Position sizing resulted in 0 shares for %s", signal["symbol"])
             return None
 
-        # 3. Place bracket order via Alpaca
+        # 3. Place order (Alpaca bracket order or simulated paper fill)
         try:
-            order_data = await self._place_bracket_order(signal, position)
+            if self._has_alpaca:
+                order_data = await self._place_bracket_order(signal, position)
+                order_id = order_data.get("id", "unknown")
+                fill_status = "pending"
+            else:
+                # Paper mode: simulate instant fill at current price
+                order_id = f"paper-{uuid.uuid4().hex[:12]}"
+                fill_status = "filled"
         except Exception as e:
             logger.error("Order placement failed for %s: %s", signal["symbol"], e)
             await self.audit.log_decision_chain(
@@ -173,19 +189,21 @@ class TradeExecutor:
         trade = Trade(
             decision_chain_id=decision_chain_id,
             signal_id=signal.get("id", 0),
-            order_id=order_data.get("id", "unknown"),
+            order_id=order_id,
             symbol=signal["symbol"],
             side="buy" if signal["action"] == "BUY" else "sell",
             shares=position.shares,
             entry_price=position.limit_price,
             stop_price=position.stop_price,
             target_price=position.target_price,
+            fill_price=signal.get("current_price") if fill_status == "filled" else None,
             ml_confidence=signal["confidence"],
             claude_confidence=review.adjusted_confidence,
             claude_reasoning=review.reasoning,
             allocation_pct=position.allocation_pct,
             dollar_amount=position.dollar_amount,
-            status="pending",
+            status=fill_status,
+            filled_at=datetime.now(timezone.utc) if fill_status == "filled" else None,
         )
         self.db.add(trade)
         await self.db.flush()

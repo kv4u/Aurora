@@ -59,6 +59,10 @@ class TradingLoop:
         }
 
         try:
+            # 0. Check open positions for stop-loss / take-profit exits
+            exits = await self._check_position_exits()
+            results["positions_closed"] = exits
+
             # 1. Portfolio snapshot + circuit breaker evaluation
             portfolio_data = await self.portfolio.snapshot()
             if not portfolio_data:
@@ -165,6 +169,15 @@ class TradingLoop:
             # Commit all changes
             await self.db.commit()
 
+            # Post-trade portfolio snapshot (captures newly placed positions)
+            if results["trades_placed"] > 0:
+                try:
+                    await self.portfolio.snapshot()
+                    await self.db.commit()
+                    logger.info("Post-trade portfolio snapshot saved")
+                except Exception as e:
+                    logger.warning("Post-trade snapshot failed: %s", e)
+
         except Exception as e:
             logger.error("Trading cycle failed: %s", e)
             results["errors"].append(str(e))
@@ -185,6 +198,92 @@ class TradingLoop:
         )
 
         return results
+
+    # ─── Position Exit Logic ───
+
+    async def _check_position_exits(self) -> int:
+        """Check all open paper positions for stop-loss / take-profit hits."""
+        from app.models.trades import Trade
+
+        result = await self.db.execute(
+            select(Trade).where(Trade.status == "filled")
+        )
+        open_trades = list(result.scalars().all())
+
+        if not open_trades:
+            return 0
+
+        # Get live prices
+        symbols = list({t.symbol for t in open_trades})
+        live_prices = await self.portfolio._get_live_prices(symbols)
+
+        exits = 0
+        for trade in open_trades:
+            current_price = live_prices.get(trade.symbol)
+            if not current_price:
+                continue
+
+            entry = trade.fill_price or trade.entry_price
+            exit_reason = None
+            exit_price = current_price
+
+            if trade.side == "buy":
+                if current_price <= trade.stop_price:
+                    exit_reason = "stop_loss"
+                elif current_price >= trade.target_price:
+                    exit_reason = "target_hit"
+            else:  # short
+                if current_price >= trade.stop_price:
+                    exit_reason = "stop_loss"
+                elif current_price <= trade.target_price:
+                    exit_reason = "target_hit"
+
+            if exit_reason:
+                # Close the position
+                if trade.side == "buy":
+                    realized_pnl = (exit_price - entry) * trade.shares
+                else:
+                    realized_pnl = (entry - exit_price) * trade.shares
+
+                pnl_pct = ((exit_price - entry) / entry * 100) if entry > 0 else 0
+                if trade.side == "sell":
+                    pnl_pct = -pnl_pct
+
+                trade.status = "closed"
+                trade.exit_price = round(exit_price, 2)
+                trade.exit_reason = exit_reason
+                trade.realized_pnl = round(realized_pnl, 2)
+                trade.realized_pnl_pct = round(pnl_pct, 2)
+                trade.closed_at = datetime.now(timezone.utc)
+
+                exits += 1
+
+                await self.audit.log(
+                    "position_closed",
+                    {
+                        "symbol": trade.symbol,
+                        "side": trade.side,
+                        "entry": entry,
+                        "exit": exit_price,
+                        "pnl": round(realized_pnl, 2),
+                        "pnl_pct": round(pnl_pct, 2),
+                        "reason": exit_reason,
+                    },
+                    component="scheduler",
+                    symbol=trade.symbol,
+                )
+
+                logger.info(
+                    "Position closed: %s %s — %s @ $%.2f → $%.2f (P&L: $%.2f / %.1f%%)",
+                    trade.side.upper(), trade.symbol, exit_reason,
+                    entry, exit_price, realized_pnl, pnl_pct,
+                )
+
+        if exits:
+            await self.db.flush()
+            logger.info("Closed %d positions via stop-loss/take-profit", exits)
+
+        return exits
 
     # ─── Context Builders ───
 
